@@ -1,116 +1,125 @@
-let allMovies = [];
-let currentMovie = null;
-
-function getMovies() {
-    const requestOptions = {
-        method: "GET",
-        redirect: "follow"
-      };
-      
-      fetch("http://localhost:3000/films", requestOptions)
-        .then((response) => response.json())
-        .then((result) => {
-            //console.log(result);
-            allMovies = result;
-            ListMovies(result);
-        })
-        .catch((error) => console.error(error));
-}
-
-function ListMovies(movies) {
-    const movieList = document.getElementById("films");
-    let html = "";
-
-    for (let i = 0; i < movies.length; i++) {
-      let movie = movies[i];
-      //console.log(movie);
-      //console.log(typeof movie);
-      html = html + `<li class="film item" onclick="clickedMovie(${i})">${movie.title}</li>`;
-    }
-
-    movieList.innerHTML = html;
-}
-getMovies();
-
-
-function clickedMovie(i) {
-    let poster = document.getElementById("poster");
-    let clickedMovie = allMovies[i];
-    poster.src = clickedMovie.poster;
-    poster.alt = clickedMovie.title;
-    movieInfo(clickedMovie.id);
-}
-
-function movieInfo(id) {
-    const title = document.getElementById("title");
-    const runtime = document.getElementById("runtime");
-    const info = document.getElementById("film-info");
-    const showtime = document.getElementById("showtime");
-    const ticket = document.getElementById("ticket-num");
-    const btn = document.getElementById("buy-ticket");
-    
-    const requestOptions = {
-        method: "GET",
-        redirect: "follow"
-      };
-      
-      fetch(`http://localhost:3000/films/${id}`, requestOptions)
-        .then((response) => response.json())
-        .then((result) => {
-            console.log(result);
-            title.innerText = result.title;
-            runtime.innerText = `${result.runtime} minutes`;
-            info.innerText = result.description;
-            showtime.innerText = result.showtime;
-            ticket.innerText = `remaining tickets ${
-                result.capacity - result.tickets_sold
-            }`;
-            console.log(result);
-            currentMovie = result;
-
-            btn.addEventListener("click", function() {
-              console.log("Buy movie");
-              let result = currentMovie;
-              let remainingTickets = result.capacity - result.tickets_sold;
-            
-              if(remainingTickets > 0) {
-                makeASale(result);
-              }else {
-                  ticket.innerText = "!!! Sold OUT";
-              }
-          });
-          })
-        .catch((error) => console.error(error));
-}
-
-
-function makeASale(movie) {
-  const myHeaders = new Headers();
-  myHeaders.append("Content-Type", "application/json");
-
-  const raw = JSON.stringify({
-    title: movie.title,
-    runtime: movie.runtime,
-    capacity: movie.capacity,
-    showtime: movie.showtime,
-    tickets_sold: movie.tickets_sold + 1,
-    description: movie.description,
-    poster: movie.poster,
-});
-
-
-const requestOptions = {
-  method: "PUT",
-  headers: myHeaders,
-  body: raw,
-  redirect: "follow"
-};
-
-fetch(`http://localhost:3000/films/${movie.id}`, requestOptions)
-  .then((response) => response.json())
-  .then((result) => {
-    //console.log(result);
-    movieInfo(movie.id);
-})
-  .catch((error) => console.error(error));
-}
+document.addEventListener('DOMContentLoaded', () => {
+    const filmsList = document.getElementById('films');
+    const movieDetails = document.getElementById('movie-details');
+  
+    // Function to fetch and display movie details
+    const fetchMovieDetails = async (id) => {
+        const response = await fetch(`http://localhost:3000/films/${id}`);
+        const movie = await response.json();
+        const availableTickets = movie.capacity - movie.tickets_sold;
+  
+        movieDetails.innerHTML = `
+            <img src="${movie.poster}" alt="${movie.title}" />
+            <h2>${movie.title}</h2>
+            <p>Runtime: ${movie.runtime} minutes</p>
+            <p>Showtime: ${movie.showtime}</p> 
+            <p>Available Tickets: ${availableTickets}</p>
+            <button id="buy-ticket" data-id="${movie.id}" ${
+            availableTickets > 0 ? '' : 'disabled'
+        }>Buy Ticket</button>
+        `;
+  
+        // Event listener for buying ticket
+        const buyTicketButton = document.getElementById('buy-ticket');
+        buyTicketButton.addEventListener('click', () => buyTicket(movie));
+    };
+  
+    // Function to buy a ticket
+    const buyTicket = async (movie) => {
+        if (movie.tickets_sold < movie.capacity) {
+            const newTicketsSold = movie.tickets_sold + 1;
+            const response = await fetch(`http://localhost:3000/films/${movie.id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    tickets_sold: newTicketsSold,
+                }),
+            });
+  
+            if (response.ok) {
+                await fetch('http://localhost:3000/tickets', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        film_id: movie.id,
+                        number_of_tickets: 1,
+                    }),
+                });
+  
+                // Update movie details after buying ticket
+                fetchMovieDetails(movie.id);
+            }
+        }
+    };
+  
+    // Function to render films menu
+    const renderFilmsMenu = async () => {
+        const response = await fetch('http://localhost:3000/films');
+        const films = await response.json();
+  
+        filmsList.innerHTML = films
+            .map(
+                film => `
+                <li class="film-item ${film.tickets_sold >= film.capacity ? 'sold-out' : ''}" data-id="${film.id}">
+                    ${film.title}
+                    ${
+                        film.tickets_sold >= film.capacity
+                            ? '<span class="status">Sold Out</span>'
+                            : `<button class="buy-ticket-btn" data-id="${film.id}" ${
+                                  film.tickets_sold >= film.capacity ? 'disabled' : ''
+                              }>Buy Ticket</button>`
+                    }
+                    <button class="delete-btn" data-id="${film.id}">Delete</button>
+                </li>`
+            )
+            .join('');
+  
+        // Add event listener to each buy ticket button
+        document.querySelectorAll('.buy-ticket-btn').forEach(button => {
+            button.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const id = event.target.dataset.id;
+                const movie = films.find(film => film.id === id);
+                buyTicket(movie);
+            });
+        });
+  
+        // Add event listener to each delete button
+        document.querySelectorAll('.delete-btn').forEach(button => {
+            button.addEventListener('click', async (event) => {
+                event.stopPropagation();
+                const id = event.target.dataset.id;
+                await deleteFilm(id);
+            });
+        });
+  
+        // Add event listener to each film item to fetch its details
+        document.querySelectorAll('.film-item').forEach(film => {
+            film.addEventListener('click', () => {
+                const id = film.dataset.id;
+                fetchMovieDetails(id);
+            });
+        });
+    };
+  
+    // Function to delete a film
+    const deleteFilm = async (id) => {
+        const response = await fetch(`http://localhost:3000/films/${id}`, {
+            method: 'DELETE',
+        });
+  
+        if (response.ok) {
+            const filmItem = document.querySelector(`.film-item[data-id="${id}"]`);
+            filmItem.remove();
+            movieDetails.innerHTML = ''; // Clear movie details when film is deleted
+        }
+    };
+  
+    // Initial setup
+    renderFilmsMenu();
+    fetchMovieDetails(1); // Display details of the first movie initially
+  });
